@@ -1,0 +1,156 @@
+---
+title: "compute_RD"
+description: "Compute squared robust distances and covariance from a robust subset"
+---
+
+Calculates the robust mean, covariance matrix, and optionally squared robust Mahalanobis distances for all observations. The function supports two modes: **auto** mode uses `covMcd` from the `robustbase` package to automatically find the best robust subset via the Minimum Covariance Determinant (MCD) estimator; **manual** mode lets you supply a pre-computed covariance matrix and subset indices directly.
+
+```r
+compute_RD(x, mode = c("auto", "manual"), cov_mcd = NULL, ind_incld = NULL, dist = TRUE)
+```
+
+## Parameters
+
+<ParamField path="x" type="numeric matrix" required>
+  Data matrix with observations as rows and variables as columns (dimensions n × p). A data frame is coerced to a matrix internally.
+</ParamField>
+
+<ParamField path="mode" type="character" default="auto">
+  Controls how the robust subset is determined.
+
+  - `"auto"` — calls `robustbase::covMcd()` internally to select the optimal subset and compute the robust covariance matrix.
+  - `"manual"` — uses the values supplied in `cov_mcd` and `ind_incld`. Both arguments must be provided when using this mode.
+</ParamField>
+
+<ParamField path="cov_mcd" type="numeric matrix">
+  Robust covariance matrix of dimensions p × p. Only used when `mode = "manual"`. Must be supplied alongside `ind_incld`; an error is raised if either is `NULL` in manual mode.
+</ParamField>
+
+<ParamField path="ind_incld" type="integer vector">
+  Row indices of the clean (included) subset used to compute the robust mean. Only used when `mode = "manual"`. All values must be valid row indices of `x`.
+</ParamField>
+
+<ParamField path="dist" type="logical" default="TRUE">
+  If `TRUE`, compute squared Mahalanobis distances for every observation in `x` using the robust mean and covariance. Set to `FALSE` to skip distance computation and return `NULL` in the `RD`, `RD_incld`, and `RD_excld` fields.
+</ParamField>
+
+<Note>
+  `RD`, `RD_incld`, and `RD_excld` contain **squared** Mahalanobis distances, not the raw (square-rooted) distances. To obtain the classical robust distance as defined in the outlier detection literature, take `sqrt(RD_obj$RD)`.
+</Note>
+
+<Warning>
+  If the robust covariance matrix `S*` is rank-deficient (i.e., fewer full-rank columns than variables), a warning is issued: `"S* may be rank-deficient; distances could be unstable."` This can occur when p is close to or exceeds h, or when variables are linearly dependent. Check the rank with `qr(RD_obj$S_star)$rank` before proceeding.
+</Warning>
+
+## Return value
+
+Returns a list of class `"RD_result"`.
+
+<ResponseField name="ind_incld" type="integer vector">
+  Row indices of the observations included in the robust subset used to compute the mean and covariance.
+</ResponseField>
+
+<ResponseField name="ind_excld" type="integer vector">
+  Row indices of observations excluded from the robust subset. Complement of `ind_incld` within `1:n`.
+</ResponseField>
+
+<ResponseField name="n" type="integer">
+  Total number of observations (rows) in `x`.
+</ResponseField>
+
+<ResponseField name="p" type="integer">
+  Number of variables (columns) in `x`.
+</ResponseField>
+
+<ResponseField name="h" type="integer">
+  Number of observations retained in the robust subset (`length(ind_incld)`).
+</ResponseField>
+
+<ResponseField name="xbar_star" type="numeric vector">
+  Robust mean vector of length p, computed from the included subset.
+</ResponseField>
+
+<ResponseField name="S_star" type="numeric matrix">
+  Robust covariance matrix of dimensions p × p, computed from the included subset.
+</ResponseField>
+
+<ResponseField name="RD" type="numeric vector">
+  Squared robust Mahalanobis distances for all n observations. `NULL` when `dist = FALSE`.
+</ResponseField>
+
+<ResponseField name="RD_incld" type="numeric vector">
+  Subset of `RD` for the included observations only (`RD[ind_incld]`). `NULL` when `dist = FALSE`.
+</ResponseField>
+
+<ResponseField name="RD_excld" type="numeric vector">
+  Subset of `RD` for the excluded observations only (`RD[ind_excld]`). `NULL` when `dist = FALSE`.
+</ResponseField>
+
+<ResponseField name="call" type="call">
+  The matched function call, stored for reproducibility.
+</ResponseField>
+
+## Examples
+
+### Auto mode with the hbk dataset
+
+The Hawkins-Bradu-Kass (`hbk`) dataset from `robustbase` is a classic outlier detection benchmark with 75 observations and 3 predictors. The first 14 observations are known outliers.
+
+```r
+library(rrobot)
+data("hbk", package = "robustbase")
+
+# Extract the predictor matrix (exclude the response column Y)
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+
+# Run in auto mode: covMcd selects the best robust subset internally
+rd <- compute_RD(x, mode = "auto", dist = TRUE)
+
+# Inspect the result
+rd$h          # number of observations in the robust subset
+rd$ind_excld  # row indices excluded by MCD (should include obs 1–14)
+
+# Squared robust distances — take sqrt() for the classical RD scale
+head(rd$RD)
+head(sqrt(rd$RD))
+```
+
+### Manual mode with a pre-computed covariance
+
+Use `mode = "manual"` when you have already run `covMcd()` and want to avoid recomputing the MCD, or when you want to fix the robust covariance to a known matrix.
+
+```r
+library(robustbase)
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+
+# Pre-compute the MCD estimator once
+mcd <- covMcd(x)
+
+# Pass the MCD output directly into compute_RD
+rd_manual <- compute_RD(
+  x         = x,
+  mode      = "manual",
+  cov_mcd   = mcd$cov,
+  ind_incld = mcd$best,
+  dist      = TRUE
+)
+
+# Results are identical to auto mode when using the same MCD object
+all.equal(rd_manual$RD, compute_RD(x)$RD)
+```
+
+### Skipping distance computation
+
+If you only need the robust mean and covariance (e.g., to pass into `threshold_RD()` with `mode = "manual"`), set `dist = FALSE` to avoid the Mahalanobis computation entirely.
+
+```r
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+
+rd_cov_only <- compute_RD(x, dist = FALSE)
+
+rd_cov_only$RD        # NULL
+rd_cov_only$xbar_star # robust mean vector (length 3)
+rd_cov_only$S_star    # robust 3 × 3 covariance matrix
+```

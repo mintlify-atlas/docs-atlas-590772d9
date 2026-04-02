@@ -1,0 +1,81 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "rrobot",
+  "projectDescription": "An R package for robust multivariate outlier detection using methods that remain effective under non-Gaussian distributions.",
+  "theme": "palm",
+  "primaryColor": "#fc0404",
+  "lightColor": null,
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/thresholding-methods",
+              "guides/shash-transformation",
+              "guides/visualization-and-summaries"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Functions",
+            "pages": [
+              "api/compute-rd",
+              "api/threshold-rd",
+              "api/shash-out"
+            ]
+          },
+          {
+            "group": "Distribution Utilities",
+            "pages": [
+              "api/shash-to-normal",
+              "api/normal-to-shash"
+            ]
+          },
+          {
+            "group": "S3 Methods",
+            "pages": [
+              "api/plot-rd",
+              "api/summary-methods"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Robust distance computation using Minimum Covariance Determinant (MCD)",
+    "Multiple thresholding strategies: SI, SI-boot, MI, MI-boot, F-distribution, and SHASH",
+    "SHASH (Sinh-Arcsinh) distribution transformation for normalizing non-Gaussian data",
+    "Univariate outlier detection with isolation forest pre-screening",
+    "Multiple imputation pipeline for handling outlier-contaminated datasets",
+    "S3 methods for plotting and summarizing results"
+  ],
+  "publicApiSurface": [
+    "compute_RD(x, mode, cov_mcd, ind_incld, dist)",
+    "threshold_RD(x, w, method, RD_obj, impute_method, cutoff, trans, M, k, alpha, quantile, verbose, boot_quant, B)",
+    "SHASH_out(x, thr0, thr1, thr, tail, use_iso, thr_iso, maxit, weight_init)",
+    "SHASH_to_normal(x, mu, sigma, nu, tau)",
+    "normal_to_SHASH(x, mu, sigma, nu, tau)",
+    "plot.RD(x, ...)",
+    "summary.F_result(object, ...)",
+    "summary.MI_result(object, ...)",
+    "summary.MI_boot_result(object, ...)",
+    "summary.SI_result(object, ...)",
+    "summary.SI_boot_result(object, ...)"
+  ]
+}

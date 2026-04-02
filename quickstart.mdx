@@ -1,80 +1,122 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Install rrobot and detect multivariate outliers in minutes."
 ---
 
-## Get started in three steps
+This guide walks you through installing rrobot, loading example data, computing robust distances, and flagging outliers. The example uses the Hawkins-Bradu-Kass (`hbk`) dataset from robustbase — a classic outlier detection benchmark that ships with rrobot's dependencies.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
 
-### Step 1: Set up your local environment
+  <Step title="Install rrobot">
+    Install the released version from CRAN, or install the development version directly from GitHub.
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    <CodeGroup>
 
-### Step 2: Deploy your changes
+    ```r CRAN
+    install.packages("rrobot")
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```r GitHub
+    # Requires the remotes package
+    install.packages("remotes")
+    remotes::install_github("mandymejia/rrobot")
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    </CodeGroup>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  </Step>
 
-### Step 3: Go live
+  <Step title="Load the package">
+    ```r
+    library(rrobot)
+    ```
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Load example data and compute robust distances">
+    The `hbk` dataset contains 75 observations and 4 columns. The first 14 rows are known outliers. Load the data, extract the predictor columns, and compute squared robust distances using `compute_RD()`.
 
-## Next steps
+    ```r
+    # Load the Hawkins-Bradu-Kass benchmark dataset
+    data("hbk", package = "robustbase")
 
-Now that you have your docs running, explore these key features:
+    # Use the three predictor columns (X1, X2, X3)
+    X <- as.matrix(hbk[, c("X1", "X2", "X3")])
+
+    # Compute robust distances via MCD (mode = "auto" selects the best subset)
+    rd <- compute_RD(X, mode = "auto", dist = TRUE)
+
+    # rd$RD        — squared robust distances for all 75 observations
+    # rd$ind_incld — row indices used to estimate the robust covariance
+    # rd$ind_excld — row indices excluded from the covariance estimate
+    # rd$xbar_star — robust mean vector (length 3)
+    # rd$S_star    — robust covariance matrix (3 × 3)
+    ```
+
+    <Note>
+      `compute_RD()` calls `covMcd()` internally to identify the subset of observations with the smallest covariance determinant. This makes the robust mean and covariance resistant to masking by outliers.
+    </Note>
+  </Step>
+
+  <Step title="Detect outliers with threshold_RD()">
+    Pass the original data matrix and the `RD_result` object from the previous step. The `SI_boot` method (the default) bootstraps a threshold from single-imputed distances and is a reliable choice for most datasets.
+
+    ```r
+    result <- threshold_RD(
+      x       = X,
+      method  = "SI_boot",
+      RD_obj  = rd,
+      alpha   = 0.01,   # significance level for the threshold
+      B       = 1000,   # number of bootstrap resamples
+      boot_quant = 0.95 # bootstrap quantile used to set the threshold
+    )
+    ```
+  </Step>
+
+  <Step title="Inspect the results">
+    The returned object is of class `RD`. Access flagged outliers and the threshold value through the `$thresholds` slot.
+
+    ```r
+    # Row indices of observations flagged as outliers
+    result$thresholds$flagged_outliers
+
+    # The numeric threshold applied to the robust distances
+    result$thresholds$threshold
+
+    # The full robust distance object (same as rd above)
+    result$RD_obj$RD
+    ```
+
+    For the `hbk` dataset, `flagged_outliers` should recover observations near rows 1–14, which are the ground-truth outliers planted in this benchmark.
+  </Step>
+
+  <Step title="Plot the results">
+    The `plot()` method for class `RD` visualises robust distances alongside the threshold and highlights flagged observations.
+
+    ```r
+    plot(result)
+    ```
+
+    <Tip>
+      The plot shows all robust distances as a scatter or histogram with a horizontal reference line at the threshold. Observations above the line are the flagged outliers.
+    </Tip>
+  </Step>
+
+</Steps>
+
+## What you have seen
+
+The workflow above demonstrates the two-stage rrobot pipeline:
+
+1. **`compute_RD()`** estimates a robust center and covariance via MCD, then returns squared Mahalanobis distances for every observation.
+2. **`threshold_RD()`** performs univariate pre-screening, imputes detected univariate outliers, and applies a data-driven threshold to the robust distances.
+
+## Explore further
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Thresholding methods" icon="sliders" href="/guides/thresholding-methods">
+    Understand when to use SI, MI, F-distribution, and SHASH thresholding strategies.
+  </Card>
+  <Card title="threshold_RD API" icon="flag" href="/api/threshold-rd">
+    Full parameter reference for threshold_RD(), including all six methods and their options.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

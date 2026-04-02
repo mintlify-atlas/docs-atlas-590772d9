@@ -1,97 +1,81 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "rrobot — Robust Outlier Detection for R"
+description: "Detect multivariate outliers in non-Gaussian data using robust distance methods and flexible thresholding strategies."
 ---
 
-## Setting up
+rrobot is an R package for robust outlier detection in multivariate data. Unlike classical methods that assume Gaussian distributions, rrobot uses techniques—including the SHASH (Sinh-Arcsinh) transformation and Minimum Covariance Determinant (MCD) estimation—that remain effective when your data is skewed, heavy-tailed, or otherwise non-normal.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Learn the concepts behind robust distance-based outlier detection and when to use rrobot.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install the package and detect your first outliers in minutes.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Thresholding Methods" icon="sliders" href="/guides/thresholding-methods">
+    Compare SI, MI, F-distribution, and SHASH thresholding strategies.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/compute-rd">
+    Full reference for all exported functions and S3 methods.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What rrobot does
 
-Everything you need to create world-class documentation.
+rrobot provides a two-stage outlier detection pipeline:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+1. **Univariate pre-screening** — Each variable is individually screened for outliers using a robust empirical rule or an isolation forest. Detected outliers are imputed before the multivariate step.
+2. **Multivariate robust distance** — Squared Mahalanobis distances are computed from a robust center and covariance (via MCD), then compared against a data-driven threshold.
 
-## Need inspiration?
+Six thresholding methods are available, ranging from simple quantile-based rules to bootstrap and multiple imputation approaches.
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={3}>
+  <Card title="SI" icon="circle-1">
+    Single imputation quantile threshold
+  </Card>
+  <Card title="SI-boot" icon="circle-2">
+    Bootstrapped single imputation threshold
+  </Card>
+  <Card title="MI" icon="circle-3">
+    Multiple imputation voting threshold
+  </Card>
+  <Card title="MI-boot" icon="circle-4">
+    Bootstrapped multiple imputation threshold
+  </Card>
+  <Card title="F-distribution" icon="circle-5">
+    Hardin-Rocke F-distribution approximation
+  </Card>
+  <Card title="SHASH" icon="circle-6">
+    SHASH-normalized F-distribution threshold
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Install rrobot">
+    Install from CRAN using a single command in your R console.
+
+    ```r
+    install.packages("rrobot")
+    ```
+  </Step>
+  <Step title="Load the package">
+    ```r
+    library(rrobot)
+    ```
+  </Step>
+  <Step title="Compute robust distances">
+    ```r
+    data("hbk", package = "robustbase")
+    X <- as.matrix(hbk[, 1:3])
+    rd <- compute_RD(X)
+    ```
+  </Step>
+  <Step title="Detect outliers">
+    ```r
+    result <- threshold_RD(X, method = "SI_boot", RD_obj = rd)
+    result$thresholds$flagged_outliers
+    ```
+  </Step>
+</Steps>

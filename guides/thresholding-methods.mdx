@@ -1,0 +1,175 @@
+---
+title: "Thresholding methods"
+description: "Compare the six outlier detection thresholding strategies in rrobot"
+---
+
+Robust outlier detection in rrobot is built on Minimum Covariance Determinant (MCD) robust distances. Once you have computed those distances with `compute_RD()`, you choose a threshold to decide which observations are outliers. rrobot offers six strategies, each making different tradeoffs between speed, robustness, and assumptions about the data.
+
+## When to use each method
+
+<AccordionGroup>
+  <Accordion title="SI — Single Imputation">
+    **Fastest option.** Computes robust distances on a single-imputed dataset using the covariance matrix from the original data, then takes the `(1 - alpha)` quantile of those distances as the threshold.
+
+    Use SI when:
+    - Computation time is the primary concern.
+    - You want a quick, reproducible baseline.
+    - Your dataset has relatively few outliers and the imputation quality is high.
+
+    **Key parameter:** `alpha = 0.01` sets the upper tail cutoff (default 99th percentile).
+  </Accordion>
+
+  <Accordion title="SI_boot — Single Imputation Bootstrap (default)">
+    **Default method.** Extends SI with `B` bootstrap resamples over the clean (MCD-included) observations. The threshold is the lower bound of a `boot_quant` confidence interval across the `B` per-sample 99th-percentile values, which makes the threshold more conservative and reduces false positives.
+
+    Use SI_boot when:
+    - You want the default recommended behavior.
+    - Better uncertainty handling matters more than raw speed.
+    - `B = 1000` bootstrap samples (configurable) is acceptable.
+
+    **Key parameters:** `B = 1000`, `alpha = 0.01`, `boot_quant = 0.95`.
+  </Accordion>
+
+  <Accordion title="MI — Multiple Imputation">
+    Generates `M` fully imputed datasets via chained-equation regression (see `MImpute()`), computes a threshold from each, and uses the lower CI bound of all `M` thresholds. More robust to imputation uncertainty than SI because variability across imputations is explicitly propagated.
+
+    Use MI when:
+    - You have substantial missingness or many outliers to impute.
+    - You want robustness to imputation uncertainty without bootstrap overhead.
+    - You can afford longer compute time (`M = 50` imputations by default).
+
+    **Key parameter:** `M = 50`.
+  </Accordion>
+
+  <Accordion title="MI_boot — Multiple Imputation Bootstrap">
+    The most thorough strategy: for each of the `M` imputed datasets, `B` bootstrap resamples are drawn and a threshold is extracted from each, yielding `M × B` threshold candidates. The final threshold is the lower CI bound across all candidates.
+
+    Use MI_boot when:
+    - Maximum robustness matters and runtime is not a constraint.
+    - Data quality is poor (many outliers, highly non-normal features).
+
+    **Key parameters:** `M = 50`, `B = 1000`, `alpha = 0.01`, `boot_quant = 0.95`.
+  </Accordion>
+
+  <Accordion title="F — F-distribution (Hardin-Rocke)">
+    Derives the threshold analytically from the Hardin and Rocke (2005) F-distribution approximation of squared MCD distances. No imputation step is needed because the threshold comes from a parametric model of the distance distribution.
+
+    Use F when:
+    - You want a theory-grounded, imputation-free threshold.
+    - The data are approximately multivariate normal after removing gross outliers.
+    - Speed and interpretability matter.
+
+    **Key parameter:** `quantile = 0.01` controls the upper tail probability.
+  </Accordion>
+
+  <Accordion title="SHASH — SHASH-normalized F-distribution">
+    Applies a SHASH normalization to each column before computing robust distances, then uses the Hardin-Rocke F-distribution threshold on the normalized distances. This corrects for skewness and heavy tails in individual variables before the multivariate step.
+
+    Use SHASH when:
+    - One or more variables are strongly non-Gaussian (skewed or heavy-tailed).
+    - You want to combine marginal normalization with a parametric multivariate threshold.
+    - `method = "SHASH"` requires `trans = "SHASH"` (the default).
+
+    **Key parameter:** `quantile = 0.01`.
+  </Accordion>
+</AccordionGroup>
+
+## Method comparison
+
+| Method | Needs imputation | Bootstrap | Best for |
+|---|---|---|---|
+| `SI` | Single imputation | No | Speed, quick baseline |
+| `SI_boot` | Single imputation | Yes (`B=1000`) | Default; good uncertainty handling |
+| `MI` | Multiple (`M=50`) | No | Imputation uncertainty, moderate speed |
+| `MI_boot` | Multiple (`M=50`) | Yes (`B=1000`) | Maximum robustness |
+| `F` | No | No | Normal-ish data, theory-grounded |
+| `SHASH` | No | No | Non-Gaussian marginals |
+
+## Running all methods at once
+
+Pass `method = "all"` to `threshold_RD()` to run every strategy in a single call and compare results side-by-side.
+
+<Note>
+  When `method = "all"`, the `$thresholds` element of the returned object is a named list with six entries — one per method — rather than a single result object. Access individual methods by name: `result$thresholds$SI`, `result$thresholds$SI_boot`, etc.
+</Note>
+
+```r
+library(rrobot)
+
+# Simulate multivariate data with a few injected outliers
+set.seed(42)
+n <- 200
+p <- 5
+x <- matrix(rnorm(n * p), nrow = n, ncol = p)
+x[c(5, 42, 99), ] <- x[c(5, 42, 99), ] + 8   # inject outliers
+
+# Step 1: compute robust distances (required before thresholding)
+RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+# Step 2: run all six thresholding methods in one call
+result <- threshold_RD(
+  x          = x,
+  method     = "all",
+  RD_obj     = RD_obj,
+  alpha      = 0.01,
+  quantile   = 0.01,
+  M          = 50,
+  B          = 1000,
+  boot_quant = 0.95,
+  verbose    = FALSE
+)
+```
+
+## Accessing results
+
+Each method returns a threshold value and the row indices of flagged outliers. The structure is consistent across methods.
+
+```r
+# The result object has class "RD"
+class(result)  # "RD"
+
+# $thresholds is a named list when method = "all"
+names(result$thresholds)
+# [1] "SI"       "SI_boot"  "MI"       "MI_boot"  "F"        "SHASH"
+
+# --- Threshold values ---
+result$thresholds$SI$threshold
+result$thresholds$SI_boot$threshold
+result$thresholds$MI$threshold
+result$thresholds$MI_boot$threshold
+result$thresholds$F$threshold
+result$thresholds$SHASH$threshold
+
+# --- Flagged outlier row indices ---
+result$thresholds$SI$flagged_outliers
+result$thresholds$SI_boot$flagged_outliers
+result$thresholds$MI$flagged_outliers
+result$thresholds$MI_boot$flagged_outliers
+result$thresholds$F$flagged_outliers
+result$thresholds$SHASH$flagged_outliers
+
+# Compare how many outliers each method flags
+sapply(result$thresholds, function(m) length(m$flagged_outliers))
+```
+
+## Reading a single method result
+
+When you run a single method instead of `"all"`, `$thresholds` is the result object directly (not a list).
+
+```r
+# Single method — result$thresholds is an SI_boot_result object
+result_si <- threshold_RD(
+  x        = x,
+  method   = "SI_boot",
+  RD_obj   = RD_obj,
+  alpha    = 0.01,
+  B        = 1000
+)
+
+result_si$thresholds$threshold          # numeric threshold value
+result_si$thresholds$flagged_outliers   # integer vector of outlier row indices
+
+# The underlying robust distance object is always available
+result_si$RD_obj$RD          # squared robust distances for every observation
+result_si$RD_obj$ind_incld   # indices of MCD-included (clean) observations
+```

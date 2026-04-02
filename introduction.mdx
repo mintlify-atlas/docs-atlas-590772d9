@@ -1,0 +1,69 @@
+---
+title: "Introduction"
+description: "Learn how rrobot detects multivariate outliers in non-Gaussian data using robust distances and flexible thresholding."
+---
+
+rrobot is an R package for robust outlier detection in multivariate data. It is designed for situations where classical methods fail — specifically when your data is skewed, heavy-tailed, or otherwise non-Gaussian. rrobot combines Minimum Covariance Determinant (MCD) estimation with six flexible thresholding strategies to identify anomalies reliably across a wide range of real-world distributions.
+
+The package is described in full in Saluja, Parlak, and Mejia (2026+), [doi:10.48550/arXiv.2505.11806](https://doi.org/10.48550/arXiv.2505.11806).
+
+## The problem with classical outlier detection
+
+Standard multivariate outlier detection relies on squared Mahalanobis distances computed from the sample mean and covariance matrix. This approach has two weaknesses in practice:
+
+- **Masking**: when outliers are present in the data used to estimate the mean and covariance, those estimates are distorted, and the outliers hide from the distance metric.
+- **Non-Gaussian distributions**: classical thresholds (typically derived from the chi-squared distribution) are only valid under Gaussian assumptions. When data is skewed or heavy-tailed, these thresholds produce excessive false positives or false negatives.
+
+## rrobot's approach
+
+rrobot addresses both problems through a two-stage pipeline.
+
+### Stage 1: Univariate pre-screening
+
+Before computing multivariate distances, each variable is individually screened for extreme values. rrobot fits a SHASH (Sinh-Arcsinh) distribution to each column using an iterative procedure that down-weights candidate outliers. Detected univariate outliers are imputed before the multivariate step, preventing them from distorting the robust covariance estimate.
+
+### Stage 2: Multivariate robust distances
+
+Squared Mahalanobis distances are computed from a robust center and covariance matrix estimated by the Minimum Covariance Determinant (MCD) method via `covMcd()` from robustbase. MCD finds the subset of observations whose covariance matrix has the smallest determinant, making it resistant to the masking effect. The resulting distances — called robust distances (RD) — measure how far each observation lies from the robust center of the data.
+
+<Note>
+  Robust distances are squared Mahalanobis distances, so they are non-negative. Under Gaussian data, they follow an approximate chi-squared distribution with _p_ degrees of freedom, where _p_ is the number of variables.
+</Note>
+
+### Stage 3: Thresholding
+
+A threshold is applied to the robust distances to flag outliers. Because the chi-squared approximation breaks down for non-Gaussian data, rrobot provides six thresholding methods that adapt to the empirical distribution:
+
+| Method | Description |
+|--------|-------------|
+| **SI** | Single imputation: threshold derived from the quantile of robust distances on imputed data |
+| **SI-boot** | Bootstrapped single imputation: bootstrap resampling stabilises the threshold estimate |
+| **MI** | Multiple imputation: _M_ imputed datasets are analysed and votes are combined |
+| **MI-boot** | Bootstrapped multiple imputation: combines MI with bootstrap for added stability |
+| **F** | Hardin-Rocke F-distribution approximation: parametric threshold based on the asymptotic distribution of MCD distances |
+| **SHASH** | SHASH-normalised F-distribution: applies the F method after transforming distances to approximate normality using SHASH |
+
+<Tip>
+  For most applications, `SI_boot` (the default) provides a good balance between statistical power and computational cost. Use `MI` or `MI_boot` when data is heavily contaminated. Use `SHASH` for strongly non-Gaussian distributions.
+</Tip>
+
+## The SHASH distribution
+
+The Sinh-Arcsinh (SHASH) distribution is a flexible four-parameter family that can represent symmetric, skewed, light-tailed, and heavy-tailed data within a single model. rrobot uses SHASH both for univariate pre-screening and for the SHASH thresholding method. The four parameters — location (μ), spread (σ), skewness (ν), and tail-weight (τ) — are estimated from the data using maximum likelihood via `gamlssML()`.
+
+## Explore further
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install rrobot and detect your first outliers in minutes using the Hawkins-Bradu-Kass benchmark dataset.
+  </Card>
+  <Card title="Thresholding methods" icon="sliders" href="/guides/thresholding-methods">
+    Compare all six thresholding strategies and understand when to use each one.
+  </Card>
+  <Card title="compute_RD" icon="calculator" href="/api/compute-rd">
+    API reference for computing squared robust distances using MCD.
+  </Card>
+  <Card title="threshold_RD" icon="flag" href="/api/threshold-rd">
+    API reference for the full outlier detection pipeline and all thresholding options.
+  </Card>
+</CardGroup>

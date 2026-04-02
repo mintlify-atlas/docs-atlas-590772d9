@@ -1,0 +1,204 @@
+---
+title: "Summary Methods"
+description: "Summarize outlier detection results from rrobot thresholding functions"
+---
+
+rrobot defines five `summary()` S3 methods, one for each result class produced by `threshold_RD()`. Each method prints a concise human-readable report to the console and returns `NULL` invisibly.
+
+<Note>
+  Call `summary()` on the threshold result object. When using a single method, this is `result$thresholds`. To summarize a specific method result when `method = "all"` was used, extract it first via `result$thresholds[["SI"]]` (or whichever method key you need) and then call `summary()` on that sub-object.
+
+  ```r
+  data("hbk", package = "robustbase")
+  x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+  rd <- compute_RD(x)
+
+  result_all <- threshold_RD(x, RD_obj = rd, method = "all", M = 20, B = 200)
+  summary(result_all$thresholds[["MI"]])
+  ```
+</Note>
+
+## Methods
+
+### `summary.SI_result`
+
+```r
+summary.SI_result(object, ...)
+```
+
+Prints a report for a Single Imputation threshold result.
+
+**Printed fields:**
+
+| Field | Description |
+|---|---|
+| SI Threshold | The computed threshold value on the robust-distance scale |
+| Number of observations | Total length of the robust distance vector |
+| Robust subset size | The `h` parameter — size of the clean subset used for covariance estimation |
+| Outliers detected | Count and percentage of observations whose RD exceeds the threshold |
+
+---
+
+### `summary.SI_boot_result`
+
+```r
+summary.SI_boot_result(object, ...)
+```
+
+Prints a report for a bootstrapped Single Imputation threshold result.
+
+**Printed fields:**
+
+| Field | Description |
+|---|---|
+| Bootstrap samples | Number of bootstrap replicates (`B`) used |
+| Lower bound (threshold) | Lower CI bound of the bootstrap distribution of quantiles, used as the conservative threshold. The exact percentile is `(1 - boot_quant) / 2` (2.5% with default `boot_quant = 0.95`). |
+| Upper bound | Upper CI bound of the bootstrap distribution (`UB_CI`). The exact percentile is `1 - (1 - boot_quant) / 2` (97.5% with default `boot_quant = 0.95`). |
+
+---
+
+### `summary.MI_result`
+
+```r
+summary.MI_result(object, ...)
+```
+
+Prints a report for a Multiple Imputation threshold result.
+
+**Printed fields:**
+
+| Field | Description |
+|---|---|
+| Number of imputations | Number of imputed datasets used |
+| Threshold summary (Min/Mean/Max) | Distribution of per-imputation thresholds |
+| Final threshold | The threshold actually applied (2.5th percentile across imputations) |
+
+---
+
+### `summary.MI_boot_result`
+
+```r
+summary.MI_boot_result(object, ...)
+```
+
+Prints a report for a bootstrapped Multiple Imputation threshold result.
+
+**Printed fields:**
+
+| Field | Description |
+|---|---|
+| Total bootstrap samples | Total number of bootstrap replicates |
+| Final threshold | The threshold applied after combining MI and bootstrap distributions |
+| Flagged outliers | Count and percentage of observations flagged as outliers |
+
+---
+
+### `summary.F_result`
+
+```r
+summary.F_result(object, ...)
+```
+
+Prints a report for a Hardin & Rocke F-distribution threshold result.
+
+**Printed fields:**
+
+| Field | Description |
+|---|---|
+| F-distribution threshold | The raw F quantile used |
+| Degrees of freedom | Both numerator and denominator df, comma-separated |
+| Consistency factor (c) | The consistency correction factor `c` |
+| Scale factor | Multiplier applied to convert the F threshold to the RD scale |
+| Estimated m parameter | The estimated effective sample size used in the F approximation |
+
+## Examples
+
+First, set up example data and compute robust distances:
+
+```r
+library(rrobot)
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+rd <- compute_RD(x)
+```
+
+<Tabs>
+  <Tab title="SI">
+    ```r
+    result <- threshold_RD(x, RD_obj = rd, method = "SI")
+    summary(result$thresholds)
+
+    # Single Imputation (SI) Results
+    # ==============================
+    # SI Threshold: 14.0671
+    # Number of observations: 75
+    # Robust subset size: 55
+    # Outliers detected: 14 (18.7%)
+    ```
+  </Tab>
+
+  <Tab title="SI_boot">
+    ```r
+    result <- threshold_RD(x, RD_obj = rd, method = "SI_boot", B = 1000)
+    summary(result$thresholds)
+
+    # Single Imputation Bootstrap (SI_boot) Results
+    # =============================================
+    # Bootstrap samples: 1000
+    # Confidence Interval:
+    #   Lower bound (threshold): 13.2154
+    #   Upper bound: 15.8832
+    ```
+  </Tab>
+
+  <Tab title="MI">
+    ```r
+    result <- threshold_RD(x, RD_obj = rd, method = "MI", M = 50)
+    summary(result$thresholds)
+
+    # Multiple Imputation (MI) Results
+    # ================================
+    # Number of imputations: 50
+    # Threshold summary:
+    #   Min:  12.9841
+    #   Mean: 14.1023
+    #   Max:  15.4417
+    # Final threshold: 12.9841
+    ```
+  </Tab>
+
+  <Tab title="MI_boot">
+    ```r
+    # With defaults M=50, B=1000: total bootstrap samples = M * B = 50000
+    result <- threshold_RD(x, RD_obj = rd, method = "MI_boot", M = 50, B = 1000)
+    summary(result$thresholds)
+
+    # Multiple Imputation Bootstrap (MI_boot) Results
+    # ===============================================
+    # Total bootstrap samples: 50000
+    # Final threshold: 13.0762
+    # Flagged outliers: 14 (18.7%)
+    ```
+  </Tab>
+
+  <Tab title="F">
+    ```r
+    result <- threshold_RD(x, RD_obj = rd, method = "F")
+    summary(result$thresholds)
+
+    # Hardin & Rocke F-Distribution Results
+    # ====================================
+    # F-distribution threshold: 4.7531
+    # Degrees of freedom: 3, 53
+    # Consistency factor (c): 1.1317
+    # Scale factor: 2.9624
+    # Estimated m parameter: 55.00
+    ```
+  </Tab>
+</Tabs>
+
+## Return value
+
+<ResponseField name="result" type="NULL">
+  Each method returns `NULL` invisibly. All output is printed as a side effect.
+</ResponseField>

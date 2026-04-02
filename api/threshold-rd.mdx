@@ -1,0 +1,208 @@
+---
+title: "threshold_RD"
+description: "Comprehensive outlier detection pipeline with univariate pre-screening and robust distance thresholding"
+---
+
+Runs the full rrobot outlier detection pipeline in a single call. The function first detects and imputes univariate outliers column-by-column, then applies one or more multivariate threshold methods to the squared robust distances produced by `compute_RD()`. Six thresholding strategies are available individually, or all six can be run at once with `method = "all"`.
+
+```r
+threshold_RD(
+  x,
+  w             = NULL,
+  method        = c("SI_boot", "MI", "MI_boot", "SI", "F", "SHASH", "all"),
+  RD_obj        = NULL,
+  impute_method = "mean",
+  cutoff        = 4,
+  trans         = "SHASH",
+  M             = 50,
+  k             = 100,
+  alpha         = 0.01,
+  quantile      = 0.01,
+  verbose       = FALSE,
+  boot_quant    = 0.95,
+  B             = 1000
+)
+```
+
+<Note>
+  `RD_obj` is required and must be created with `compute_RD()` before calling `threshold_RD()`. Pass the same data matrix `x` to both functions. See [compute_RD](/api/compute-rd) for details.
+</Note>
+
+## Parameters
+
+<ParamField path="x" type="numeric matrix" required>
+  Data matrix with observations as rows and variables as columns (dimensions n × p). This is the same matrix passed to `compute_RD()`.
+</ParamField>
+
+<ParamField path="w" type="numeric matrix">
+  Optional predictor matrix of dimensions n × L, where L is the number of low-kurtosis ICA components. When supplied, multiple imputation (`"MI"` and `"MI_boot"` methods) uses `w` as auxiliary predictors in the chained-equation imputation model.
+</ParamField>
+
+<ParamField path="method" type="character" default="SI_boot">
+  Thresholding method to apply. Must be one of:
+
+  - `"SI_boot"` — single imputation with bootstrap confidence interval on the threshold (default).
+  - `"SI"` — single imputation; threshold is the (1 − alpha) quantile of robust distances from the imputed data.
+  - `"MI"` — multiple imputation; threshold is pooled across M imputed datasets.
+  - `"MI_boot"` — multiple imputation with bootstrap confidence intervals.
+  - `"F"` — F-distribution approximation following Hardin & Rocke (2005).
+  - `"SHASH"` — F-distribution threshold applied to SHASH-normalised robust distances.
+  - `"all"` — run all six methods and return results as a named list.
+</ParamField>
+
+<ParamField path="RD_obj" type="list" required>
+  Output from `compute_RD()`. Must not be `NULL`. Provides the pre-computed robust covariance, subset indices, and squared distances used by all thresholding methods.
+</ParamField>
+
+<ParamField path="impute_method" type="character" default="mean">
+  Imputation method used to replace detected univariate outliers before computing the threshold. Passed to the internal `impute_univOut()` function.
+</ParamField>
+
+<ParamField path="cutoff" type="numeric" default="4">
+  Number of MADs from the median at which a value is flagged as a univariate outlier during the pre-screening step. Passed to `univOut()`.
+</ParamField>
+
+<ParamField path="trans" type="character" default="SHASH">
+  Transformation applied during univariate outlier detection. One of `"SHASH"` or `"robZ"`. When `method = "SHASH"`, `trans` must also be `"SHASH"`.
+</ParamField>
+
+<ParamField path="M" type="integer" default="50">
+  Number of multiply imputed datasets generated when `method` is `"MI"` or `"MI_boot"`. Larger values reduce Monte Carlo variability in the pooled threshold but increase computation time.
+</ParamField>
+
+<ParamField path="k" type="integer" default="100">
+  Number of chained-equation cycles performed per multiply imputed dataset. Controls convergence quality of the imputation model.
+</ParamField>
+
+<ParamField path="alpha" type="numeric" default="0.01">
+  Significance level for the SI and MI threshold methods. The threshold is set at the (1 − alpha) quantile of the robust distance distribution, so `alpha = 0.01` corresponds to the 99th percentile.
+</ParamField>
+
+<ParamField path="quantile" type="numeric" default="0.01">
+  Upper-tail quantile used to compute the F-distribution and SHASH thresholds. Represents the expected false positive rate: `quantile = 0.01` flags the top 1% of observations under the null F-distribution.
+</ParamField>
+
+<ParamField path="verbose" type="logical" default="FALSE">
+  If `TRUE`, print progress messages to the console at each major step (univariate outlier detection, imputation, multiple imputation dataset generation, thresholding).
+</ParamField>
+
+<ParamField path="boot_quant" type="numeric" default="0.95">
+  Bootstrap quantile used to form the lower confidence bound on the threshold in `"SI_boot"` and `"MI_boot"` methods. A value of `0.95` gives the 5th percentile of the bootstrap distribution as a conservative (lower) threshold.
+</ParamField>
+
+<ParamField path="B" type="integer" default="1000">
+  Number of bootstrap samples drawn per imputed dataset for the `"SI_boot"` and `"MI_boot"` methods.
+</ParamField>
+
+## Return value
+
+Returns a list of class `"RD"` with the following fields. Several internal objects are also attached as attributes (accessible via `attr(result, ...)`).
+
+<ResponseField name="thresholds" type="list">
+  Result from the chosen thresholding method. When `method = "all"`, this is a named list with elements `SI`, `SI_boot`, `MI`, `MI_boot`, `F`, and `SHASH`. Each element contains at minimum a `threshold` numeric scalar and a `flagged_outliers` integer vector of row indices that exceeded the threshold.
+</ResponseField>
+
+<ResponseField name="RD_obj" type="list">
+  The `RD_result` object passed in via the `RD_obj` argument, returned unchanged for downstream access.
+</ResponseField>
+
+<ResponseField name="RD_obj_shash" type="list">
+  A second `RD_result` object computed on the SHASH-normalised and column-scaled data. Populated only when `method` is `"SHASH"` or `"all"`; otherwise `NULL`.
+</ResponseField>
+
+<ResponseField name="x_norm" type="numeric matrix">
+  Matrix of SHASH-normalised scores for each column of `x`, returned only when `method` is `"SHASH"` or `"all"`; otherwise `NULL`.
+</ResponseField>
+
+<ResponseField name="call" type="call">
+  The matched function call, stored for reproducibility.
+</ResponseField>
+
+<Tip>
+  Use `method = "all"` during exploratory analysis to compare all thresholding strategies on the same data. Access individual results with `result$thresholds$SI_boot`, `result$thresholds$F`, etc. Once you settle on a preferred method, switch to that specific string for production use to avoid the overhead of running all six methods.
+</Tip>
+
+## Examples
+
+### Default method: SI_boot
+
+```r
+library(rrobot)
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+
+# Step 1: compute robust distances
+rd <- compute_RD(x)
+
+# Step 2: threshold using single imputation + bootstrap (default)
+result <- threshold_RD(x, RD_obj = rd)
+
+result$thresholds$threshold        # the threshold value
+result$thresholds$flagged_outliers # row indices declared as outliers
+```
+
+### F-distribution method
+
+```r
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+rd <- compute_RD(x)
+
+result_F <- threshold_RD(
+  x        = x,
+  RD_obj   = rd,
+  method   = "F",
+  quantile = 0.01   # flag top 1% under the F approximation
+)
+
+result_F$thresholds$threshold
+result_F$thresholds$flagged_outliers
+```
+
+### SHASH method
+
+```r
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+rd <- compute_RD(x)
+
+# SHASH method normalises each column before computing robust distances
+result_shash <- threshold_RD(
+  x      = x,
+  RD_obj = rd,
+  method = "SHASH",
+  trans  = "SHASH",    # must match method when method = "SHASH"
+  quantile = 0.01
+)
+
+result_shash$thresholds$flagged_outliers
+result_shash$RD_obj_shash$h  # robust subset size on the normalised data
+```
+
+### Run all methods at once
+
+```r
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+rd <- compute_RD(x)
+
+result_all <- threshold_RD(
+  x       = x,
+  RD_obj  = rd,
+  method  = "all",
+  M       = 20,    # reduce M for faster example
+  B       = 200,   # reduce B for faster example
+  verbose = TRUE
+)
+
+# Access each method's flagged outliers
+result_all$thresholds$SI$flagged_outliers
+result_all$thresholds$SI_boot$flagged_outliers
+result_all$thresholds$MI$flagged_outliers
+result_all$thresholds$MI_boot$flagged_outliers
+result_all$thresholds$F$flagged_outliers
+result_all$thresholds$SHASH$flagged_outliers
+
+# Compare thresholds across methods
+sapply(result_all$thresholds, `[[`, "threshold")
+```

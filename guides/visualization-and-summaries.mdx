@@ -1,0 +1,288 @@
+---
+title: "Visualization and summaries"
+description: "Plotting and summarizing outlier detection results in rrobot"
+---
+
+After running `threshold_RD()`, rrobot provides S3 `plot()` and `summary()` methods for every result class. These functions let you quickly inspect robust distances, threshold placements, and imputation results without writing custom visualization code.
+
+## Plotting with `plot.RD()`
+
+`plot.RD()` dispatches on an object of class `"RD"` (the return value of `threshold_RD()`) and supports three plot types controlled by the `type` argument:
+
+| `type` | What it produces |
+|---|---|
+| `"histogram"` (default) | Histogram of squared robust distances on a log scale with a dashed threshold line. Observations are colored by their MCD inclusion status (included = green, excluded = orange). For `method = "all"` results, all method thresholds are overlaid as colored vertical lines. |
+| `"imputations"` | Time-series plots per variable showing original data (black), temporal imputation (green dashed), all MI draws (blue, semi-transparent), one randomly highlighted MI draw (orange), and flagged outlier points (red). Only available when the result was produced with `method` set to `"MI"` or `"MI_boot"`. |
+| `"univOut"` | Heatmap of the univariate outlier detection matrix — each cell represents one observation × variable combination, colored by whether it was flagged as a univariate outlier before the multivariate step. |
+
+### Function signature
+
+```r
+plot(x, type = c("histogram", "imputations", "univOut"), method = NULL, ...)
+```
+
+When `type = "histogram"` and `method` is `NULL`, the method is auto-detected from the class of `x$thresholds`. You can override it by passing `method = "SI"`, `"SI_boot"`, `"MI"`, `"MI_boot"`, `"F"`, or `"SHASH"`. When `x$thresholds` is a list (i.e. the result was run with `method = "all"`), all non-SHASH thresholds are shown as overlaid colored lines in a single plot.
+
+### Examples by result type
+
+<Tabs>
+  <Tab title="SI_boot (default)">
+    ```r
+    library(rrobot)
+
+    set.seed(42)
+    x <- matrix(rnorm(200 * 5), nrow = 200)
+    x[c(5, 42), ] <- x[c(5, 42), ] + 8
+
+    RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+    result <- threshold_RD(
+      x      = x,
+      method = "SI_boot",
+      RD_obj = RD_obj,
+      B      = 1000
+    )
+
+    # Histogram with SI_boot threshold line (auto-detected)
+    plot(result)
+    ```
+
+    The histogram shows log10-scaled squared robust distances. The dashed vertical line is the SI_boot lower CI bound threshold. Observations in the MCD-excluded set (potential outliers) appear in orange; MCD-included observations appear in green.
+  </Tab>
+
+  <Tab title="F-distribution">
+    ```r
+    library(rrobot)
+
+    set.seed(42)
+    x <- matrix(rnorm(200 * 5), nrow = 200)
+    x[c(5, 42), ] <- x[c(5, 42), ] + 8
+
+    RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+    result_f <- threshold_RD(
+      x        = x,
+      method   = "F",
+      RD_obj   = RD_obj,
+      quantile = 0.01
+    )
+
+    # Histogram with F-distribution curve overlay and threshold line
+    plot(result_f)
+    ```
+
+    The F-distribution plot adds a scaled F-density curve (grey line) over the histogram, showing how well the parametric model fits the empirical distance distribution.
+  </Tab>
+
+  <Tab title="All methods">
+    ```r
+    library(rrobot)
+
+    set.seed(42)
+    x <- matrix(rnorm(200 * 5), nrow = 200)
+    x[c(5, 42), ] <- x[c(5, 42), ] + 8
+
+    RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+    result_all <- threshold_RD(
+      x      = x,
+      method = "all",
+      RD_obj = RD_obj,
+      M      = 50,
+      B      = 1000
+    )
+
+    # Multi-threshold histogram: all non-SHASH methods shown as colored lines
+    plot(result_all)
+
+    # Plot a single method from the "all" result
+    plot(result_all, method = "MI")
+    ```
+
+    When called with a `method = "all"` result, the default histogram overlays SI, SI_boot, MI, MI_boot, and F threshold lines in different colors on a single log(RD) histogram, making it easy to compare where each method draws the boundary.
+  </Tab>
+
+  <Tab title="Imputations">
+    ```r
+    library(rrobot)
+
+    set.seed(42)
+    x <- matrix(rnorm(200 * 3), nrow = 200)
+    x[c(5, 42), ] <- x[c(5, 42), ] + 8
+
+    RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+    result_mi <- threshold_RD(
+      x      = x,
+      method = "MI",
+      RD_obj = RD_obj,
+      M      = 20
+    )
+
+    # One time-series plot per variable showing all imputation draws
+    plot(result_mi, type = "imputations")
+    ```
+
+    Each variable gets its own panel. The original series (black), temporal mean imputation (green dashed), and all `M` multiple imputation draws (blue) are shown together, with flagged outlier positions highlighted in red. One randomly selected draw is highlighted in orange to give a sense of individual draw variation.
+  </Tab>
+
+  <Tab title="Univariate outliers">
+    ```r
+    library(rrobot)
+
+    set.seed(42)
+    x <- matrix(rnorm(200 * 5), nrow = 200)
+    x[c(5, 42), 1:2] <- x[c(5, 42), 1:2] + 8
+
+    RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+    result <- threshold_RD(
+      x      = x,
+      method = "SI_boot",
+      RD_obj = RD_obj
+    )
+
+    # Heatmap: rows = observations, columns = variables, dark = outlier
+    plot(result, type = "univOut")
+    ```
+
+    The heatmap uses a light background for inliers and a dark fill for flagged univariate outliers, making it easy to spot variables or time points with concentrated outlier activity.
+  </Tab>
+</Tabs>
+
+## Summarizing results with `summary()`
+
+Each thresholding method has its own `summary()` method that prints key diagnostics to the console. Call `summary()` directly on the threshold result object (the `$thresholds` element of the `"RD"` object).
+
+```r
+# Setup used in all examples below
+library(rrobot)
+set.seed(42)
+x <- matrix(rnorm(200 * 5), nrow = 200)
+x[c(5, 42, 99), ] <- x[c(5, 42, 99), ] + 8
+RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+```
+
+### SI — Single Imputation
+
+```r
+result_si <- threshold_RD(x, RD_obj = RD_obj, method = "SI")
+summary(result_si$thresholds)
+```
+
+```
+Single Imputation (SI) Results
+==============================
+SI Threshold: 14.2371
+Number of observations: 200
+Robust subset size: 148
+Outliers detected: 3 (1.5%)
+```
+
+Reports the threshold value, total observation count, number of observations in the MCD-included subset (`h`), and the count and percentage of observations flagged as outliers.
+
+### SI_boot — Single Imputation Bootstrap
+
+```r
+result_siboot <- threshold_RD(x, RD_obj = RD_obj, method = "SI_boot", B = 1000)
+summary(result_siboot$thresholds)
+```
+
+```
+Single Imputation Bootstrap (SI_boot) Results
+=============================================
+Bootstrap samples: 1000
+Confidence Interval:
+  Lower bound (threshold): 13.8902
+  Upper bound: 15.6117
+```
+
+Reports the number of bootstrap samples, the lower CI bound (used as the threshold), and the upper CI bound. The width of this interval reflects how much the threshold varies across bootstrap resamples.
+
+### MI — Multiple Imputation
+
+```r
+result_mi <- threshold_RD(x, RD_obj = RD_obj, method = "MI", M = 50)
+summary(result_mi$thresholds)
+```
+
+```
+Multiple Imputation (MI) Results
+================================
+Number of imputations: 50
+Threshold summary:
+  Min: 12.4501
+  Mean: 13.9872
+  Max: 15.2340
+Final threshold: 12.8013
+```
+
+Reports the number of imputed datasets, the distribution of per-imputation threshold values (min, mean, max), and the final threshold (lower CI bound across the `M` per-imputation quantiles).
+
+### MI_boot — Multiple Imputation Bootstrap
+
+```r
+# With M=50, B=1000: total bootstrap samples = M * B = 50000
+result_miboot <- threshold_RD(x, RD_obj = RD_obj, method = "MI_boot", M = 50, B = 1000)
+summary(result_miboot$thresholds)
+```
+
+```
+Multiple Imputation Bootstrap (MI_boot) Results
+===============================================
+Total bootstrap samples: 50000
+Final threshold: 13.1245
+Flagged outliers: 3 (1.5%)
+```
+
+Reports the total number of bootstrap samples (`M × B`), the final threshold, and the count and percentage of flagged outliers.
+
+### F — Hardin-Rocke F-distribution
+
+```r
+result_f <- threshold_RD(x, RD_obj = RD_obj, method = "F")
+summary(result_f$thresholds)
+```
+
+```
+Hardin & Rocke F-Distribution Results
+====================================
+F-distribution threshold: 18.4762
+Degrees of freedom: 5, 145.23
+Consistency factor (c): 1.0614
+Scale factor: 0.0283
+Estimated m parameter: 150.23
+```
+
+Reports the threshold on the original (unscaled) robust distance scale, the F-distribution degrees of freedom (`df1 = p`, `df2 = m - p + 1`), the MCD consistency correction factor `c`, the scale factor used when comparing distances to the F quantile, and the estimated `m` parameter from the Hardin-Rocke finite-sample correction.
+
+## Complete workflow example
+
+```r
+library(rrobot)
+
+set.seed(42)
+x <- matrix(rnorm(200 * 5), nrow = 200)
+x[c(5, 42, 99), ] <- x[c(5, 42, 99), ] + 8
+
+# Step 1: compute robust distances
+RD_obj <- compute_RD(x, mode = "auto", dist = TRUE)
+
+# Step 2: run default method (SI_boot)
+result <- threshold_RD(
+  x      = x,
+  method = "SI_boot",
+  RD_obj = RD_obj,
+  B      = 1000,
+  alpha  = 0.01
+)
+
+# Step 3: summarize the threshold result
+summary(result$thresholds)
+
+# Step 4: visualize RD histogram with threshold
+plot(result)
+
+# Step 5: visualize univariate outlier heatmap
+plot(result, type = "univOut")
+```

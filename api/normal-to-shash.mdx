@@ -1,0 +1,71 @@
+---
+title: "normal_to_SHASH"
+description: "Transform standard normal data back to the SHASH-distributed scale"
+---
+
+`normal_to_SHASH()` is the exact inverse of [`SHASH_to_normal()`](/api/shash-to-normal). It maps values on the standard normal scale back to the original SHASH (Sinh-Arcsinh) distribution scale. The two functions form a matched pair: applying `SHASH_to_normal()` followed by `normal_to_SHASH()` with the same parameters recovers the original data exactly (up to floating-point precision).
+
+## Parameters
+
+<ParamField path="x" type="numeric vector" required>
+  Values on the normal scale to transform back to the SHASH scale.
+</ParamField>
+
+<ParamField path="mu" type="numeric scalar" required>
+  Location parameter controlling the mean of the SHASH distribution. Must match the value used in the corresponding `SHASH_to_normal()` call.
+</ParamField>
+
+<ParamField path="sigma" type="numeric scalar" required>
+  Spread parameter on the log scale. The function applies `exp(sigma)` internally. Pass `sigma = 0` for unit spread since `exp(0) = 1`. Must match the value used in the corresponding `SHASH_to_normal()` call.
+</ParamField>
+
+<ParamField path="nu" type="numeric scalar" required>
+  Skewness parameter. A value of `0` gives a symmetric distribution. Must match the value used in the corresponding `SHASH_to_normal()` call.
+</ParamField>
+
+<ParamField path="tau" type="numeric scalar" required>
+  Tail-weight parameter on the log scale. Pass `tau = 0` for normal-like tails since `exp(0) = 1`. Must match the value used in the corresponding `SHASH_to_normal()` call.
+</ParamField>
+
+## Return value
+
+<ResponseField name="result" type="numeric vector">
+  Transformed values on the SHASH-distributed scale, the same length as `x`.
+</ResponseField>
+
+## Mathematical formula
+
+Given the exp-transformed spread and tail-weight, the back-transformation applied to each element of `x` is:
+
+```
+(sigma * tau * sinh((asinh(x) + nu) / tau)) + mu
+```
+
+where `sigma` and `tau` in the formula are `exp(sigma)` and `exp(tau)` of the parameters you pass.
+
+## Example
+
+```r
+set.seed(42)
+x <- rnorm(200)
+
+# Inject two outliers into the upper tail
+x[c(17, 77)] <- x[c(17, 77)] + 5
+
+# Parameters: identity spread, symmetric, normal-like tails
+mu <- 0; sigma <- 0; nu <- 0; tau <- 0
+
+# Step 1: transform to approximately normal scale
+z <- SHASH_to_normal(x, mu = mu, sigma = sigma, nu = nu, tau = tau)
+
+# Step 2: invert back to the original SHASH scale
+x_recovered <- normal_to_SHASH(z, mu = mu, sigma = sigma, nu = nu, tau = tau)
+
+# Confirm the round-trip is exact (up to floating-point precision)
+all.equal(x, x_recovered)
+#> [1] TRUE
+```
+
+## See also
+
+- [`SHASH_to_normal()`](/api/shash-to-normal) — the forward transformation, mapping SHASH-distributed values to approximately normal scale.

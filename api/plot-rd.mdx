@@ -1,0 +1,93 @@
+---
+title: "plot.RD"
+description: "Plot robust distance histograms and outlier detection results"
+---
+
+S3 plot method for objects of class `"RD"`, as returned by `threshold_RD()`. Depending on the `type` argument the method dispatches to one of three distinct visualisations.
+
+<Note>
+  This is an S3 method. Call it as `plot(result)` on your `RD` object, not as `plot.RD(result)` directly.
+</Note>
+
+## Parameters
+
+<ParamField path="x" type="RD object" required>
+  An object of class `"RD"` returned by `threshold_RD()`.
+</ParamField>
+
+<ParamField path="type" type="character">
+  The type of plot to produce. One of:
+
+  - `"histogram"` *(default)* — histogram of robust distances with a vertical threshold line, colored by included/excluded status. When the object contains results from multiple threshold methods (i.e. `method = "all"` was used), overlays all threshold lines in a single plot.
+  - `"imputations"` — time-series plots for each variable showing the original data, the temporal imputation (dashed green line), all multiple imputation draws (semi-transparent blue lines), one randomly highlighted imputation draw (orange), and detected outlier locations (red points). Only available when the object was produced with a multiple-imputation method (`"MI"` or `"MI_boot"`).
+  - `"univOut"` — heatmap of the univariate outlier matrix for high-kurtosis components, with observations on the y-axis and variables on the x-axis. Cells are dark navy where an outlier was detected and light grey otherwise.
+</ParamField>
+
+<ParamField path="method" type="character">
+  The threshold method to use when `type = "histogram"`. If `NULL` (default) the method is auto-detected from the class of `x$thresholds`. Valid values are `"F"`, `"SI"`, `"SI_boot"`, `"MI"`, `"MI_boot"`, and `"SHASH"`. Ignored for `type = "imputations"` and `type = "univOut"`.
+</ParamField>
+
+<ParamField path="..." type="">
+  Additional arguments forwarded to the underlying plotting helper (e.g. `alpha`, `binwidth`, `show_f_density`).
+</ParamField>
+
+## Return value
+
+<ResponseField name="result" type="ggplot object">
+  A ggplot object. For `type = "imputations"` the plots are printed directly inside the function (one per variable) and `NULL` is returned invisibly.
+</ResponseField>
+
+## Plot details
+
+### `"histogram"` (default)
+
+Produces a density histogram of the raw robust distances on a log10 x-axis. Bars are colored green for observations included in the robust subset and orange-red for excluded observations. A dashed vertical line marks the threshold value.
+
+When `method = "F"` the F-distribution curve (scaled to match the empirical peak density) is overlaid in addition to the threshold line.
+
+When the `RD` object holds results for all methods simultaneously (produced with `method = "all"`), a multi-threshold variant is rendered: a single histogram with one colored vertical line per method for easy visual comparison.
+
+### `"imputations"`
+
+Generates one time-series plot per variable. Requires a multiple-imputation result (`"MI"` or `"MI_boot"`); raises an error otherwise. Each plot layers:
+
+- Black line/points — the original observed series
+- Green dashed line — the temporal (interpolation/mean) imputation
+- Semi-transparent blue lines — all individual MI draws
+- Orange line — one randomly selected MI draw highlighted for reference
+- Red points — locations flagged as univariate outliers
+
+### `"univOut"`
+
+Renders a tile heatmap of the boolean outlier matrix for high-kurtosis components. Each cell represents one (observation, variable) pair: dark navy (`#191970`) indicates a detected outlier, light grey (`#f5f5f5`) indicates an inlier.
+
+## Example
+
+```r
+library(rrobot)
+
+# Prepare example data
+data("hbk", package = "robustbase")
+x <- as.matrix(hbk[, c("X1", "X2", "X3")])
+rd <- compute_RD(x)
+
+# Run robust distance analysis with single-imputation thresholding
+result <- threshold_RD(x, RD_obj = rd, method = "SI")
+
+# Default histogram plot (auto-detects SI method)
+plot(result)
+
+# Explicitly request the histogram for the SI method
+plot(result, type = "histogram", method = "SI")
+
+# Univariate outlier heatmap
+plot(result, type = "univOut")
+
+# Compare all threshold methods at once
+result_all <- threshold_RD(x, RD_obj = rd, method = "all", M = 20, B = 200)
+plot(result_all)  # renders the multi-threshold overlay
+
+# Imputation time-series plots (MI only)
+result_mi <- threshold_RD(x, RD_obj = rd, method = "MI", M = 20)
+plot(result_mi, type = "imputations")
+```

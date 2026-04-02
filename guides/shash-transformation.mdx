@@ -1,0 +1,226 @@
+---
+title: "SHASH transformation"
+description: "Normalize non-Gaussian data using the Sinh-Arcsinh distribution"
+---
+
+The Sinh-Arcsinh (SHASH) distribution, introduced by Jones and Pewsey (2009), is a flexible four-parameter family that can model skewness and heavy or light tails while remaining analytically tractable. rrobot uses it in two places: as a univariate outlier pre-screen inside `threshold_RD()`, and as a standalone tool via `SHASH_out()` for column-wise normalization before robust distance computation.
+
+## The four SHASH parameters
+
+| Parameter | Role | Scale |
+|---|---|---|
+| `mu` | Location (shifts the distribution left/right) | Original data scale |
+| `sigma` | Spread (controls standard deviation) | **Log scale** — pass the raw coefficient from `gamlssML()` |
+| `nu` | Skewness (0 = symmetric) | Direct |
+| `tau` | Tail weight (0 = normal-like tails) | **Log scale** — pass the raw coefficient from `gamlssML()` |
+
+<Tip>
+  `sigma` and `tau` are stored and accepted on the **log scale** because `gamlssML()` returns them that way. `SHASH_to_normal()` and `normal_to_SHASH()` apply `exp()` internally, so you should pass the raw fitted coefficients without transforming them yourself. Pass `sigma = 0` for unit spread (`exp(0) = 1`) and `tau = 0` for normal-like tails.
+</Tip>
+
+## Transformation functions
+
+`SHASH_to_normal()` and `normal_to_SHASH()` are a matched pair. Given fitted SHASH parameters, `SHASH_to_normal()` maps each value onto an approximately standard-normal scale; `normal_to_SHASH()` inverts that mapping exactly.
+
+```r
+library(rrobot)
+
+set.seed(42)
+x <- rnorm(200)
+x[c(17, 77)] <- x[c(17, 77)] + 5   # inject two upper outliers
+
+# Identity transform: mu=0, sigma=0, nu=0, tau=0 recovers x
+mu <- 0; sigma <- 0; nu <- 0; tau <- 0
+
+z           <- SHASH_to_normal(x,  mu = mu, sigma = sigma, nu = nu, tau = tau)
+x_recovered <- normal_to_SHASH(z,  mu = mu, sigma = sigma, nu = nu, tau = tau)
+
+all.equal(x, x_recovered)   # TRUE
+```
+
+In practice you will use parameter values fitted by `gamlssML()` via `SHASH_out()` rather than setting them manually.
+
+## Univariate outlier detection with `SHASH_out()`
+
+`SHASH_out()` iteratively fits a SHASH distribution to a numeric vector, each time excluding candidate outliers from the fit, until the inlier set stabilises. The normalised scores `x_norm` from the converged fit identify outliers on an approximately standard-normal scale.
+
+### Function signature
+
+```r
+SHASH_out(
+  x,
+  thr0        = 2.58,
+  thr1        = 2.58,
+  thr         = 4,
+  tail        = c("both", "upper", "lower"),
+  use_iso     = TRUE,
+  thr_iso     = 0.6,
+  maxit       = 100,
+  weight_init = NULL
+)
+```
+
+| Parameter | Description |
+|---|---|
+| `x` | Numeric vector (may contain `NA`; they are excluded from fitting and propagated in output). |
+| `thr0` | Initial outlier pre-flagging threshold when `use_iso = FALSE` (default 2.58, roughly 99% normal). |
+| `thr1` | Inlier threshold used during iterative convergence (default 2.58). |
+| `thr` | Final threshold applied to converged normalised scores to declare outliers (default 4). |
+| `tail` | Which tail(s) to check: `"both"` (default), `"upper"`, or `"lower"`. |
+| `use_iso` | If `TRUE` (default), pre-screens with an isolation forest before iterating. |
+| `thr_iso` | Isolation forest score threshold in [0, 1]; scores at or above this are candidate outliers (default 0.6). |
+| `maxit` | Maximum iterations before stopping regardless of convergence (default 100). |
+| `weight_init` | Optional logical vector to seed the first iteration directly, bypassing pre-screening. |
+
+### The isolation forest pre-screen
+
+When `use_iso = TRUE` (the default), an isolation forest from the `isotree` package scores each observation. Any observation with a score ≥ `thr_iso` is treated as a candidate outlier and excluded from the first SHASH fit. This prevents extreme values from distorting the initial parameter estimates.
+
+Disable isolation forest pre-screening (`use_iso = FALSE`) when:
+- You want faster execution for interactive exploration.
+- Your data are small and isolation forest scores would be noisy.
+- You are supplying `weight_init` directly.
+
+### Iterative fitting workflow
+
+<Steps>
+  <Step title="Pre-screen candidates">
+    If `use_iso = TRUE`, fit an isolation forest and flag observations scoring ≥ `thr_iso` as initial candidates. Otherwise use the robust empirical rule (median ± `thr0` × MAD) to find initial candidates.
+  </Step>
+
+  <Step title="Fit SHASH to inliers">
+    Call `gamlssML()` with the SHASHo2 family, weighting inliers (weight = 1) and excluding outlier candidates (weight = 0). Extract fitted coefficients `mu`, `sigma`, `nu`, `tau`.
+  </Step>
+
+  <Step title="Normalise all observations">
+    Apply `SHASH_to_normal()` using the fitted parameters to map every observation onto an approximately standard-normal scale. Store the result as `x_norm`.
+  </Step>
+
+  <Step title="Update inlier set">
+    Flag observations whose normalised score exceeds `thr1` (in the specified tail) as new candidates. Compare the new inlier set to the previous one.
+  </Step>
+
+  <Step title="Check convergence">
+    If the inlier set is unchanged from the previous iteration, convergence is declared (`converged = TRUE`) and the loop exits. Otherwise repeat from step 2, up to `maxit` iterations.
+  </Step>
+
+  <Step title="Apply final threshold">
+    Using the converged normalised scores, flag observations exceeding `thr` as outliers. Return `out_idx` with their positions.
+  </Step>
+</Steps>
+
+### Convergence diagnostics
+
+```r
+# converged = TRUE means the inlier set stabilised before maxit
+result$converged
+
+# last_iter is the number of iterations actually run
+result$last_iter
+
+# norm_iters is a matrix (n_obs × last_iter) of normalised scores per iteration
+# indx_iters is a matrix (n_obs × last_iter) of per-iteration outlier flags (1 = outlier)
+dim(result$norm_iters)
+dim(result$indx_iters)
+```
+
+If `converged = FALSE` the algorithm hit `maxit` without stabilising. Inspect `norm_iters` to see whether the inlier set was still changing rapidly or had nearly converged. Increasing `maxit` or relaxing `thr1` usually resolves this.
+
+## Worked example: injected outliers
+
+```r
+library(rrobot)
+
+# Simulate data from a normal distribution with known outlier positions
+set.seed(42)
+x <- rnorm(200, mean = 10, sd = 2)
+
+# Shift a handful of observations far into the upper tail
+outlier_positions <- c(17, 77, seq(190, 200))
+x[outlier_positions] <- x[outlier_positions] + 10
+
+# Run SHASH outlier detection
+# use_iso = FALSE keeps the example fast and reproducible
+result_sim <- SHASH_out(
+  x,
+  thr0    = 2.58,
+  thr1    = 2.58,
+  thr     = 4,
+  tail    = "both",
+  use_iso = FALSE
+)
+
+# Check which observations were flagged
+result_sim$out_idx
+
+# Did the algorithm converge?
+result_sim$converged
+
+# Fitted SHASH parameters (sigma and tau are on log scale)
+result_sim$SHASH_coef
+```
+
+## Example with the hbk benchmark dataset
+
+`hbk` (Hawkins-Bradu-Kass) is a classic outlier detection benchmark included in `robustbase`, which rrobot imports.
+
+```r
+library(rrobot)
+
+data("hbk", package = "robustbase")
+
+result_hbk <- SHASH_out(
+  hbk$X1,
+  thr0    = 2.58,
+  thr1    = 2.58,
+  thr     = 4,
+  tail    = "both",
+  use_iso = FALSE
+)
+
+# Flagged row indices in X1
+result_hbk$out_idx
+
+# Fitted parameters — sigma and tau are on the log scale
+result_hbk$SHASH_coef
+
+# Convergence status
+result_hbk$converged
+result_hbk$last_iter
+```
+
+## Using transformation functions with fitted parameters
+
+Once you have fitted parameters from `SHASH_out()`, you can use `SHASH_to_normal()` and `normal_to_SHASH()` directly with those estimates.
+
+```r
+library(rrobot)
+
+set.seed(42)
+x <- rnorm(200, mean = 10, sd = 2)
+x[c(17, 77)] <- x[c(17, 77)] + 10
+
+# Fit parameters via SHASH_out
+fit <- SHASH_out(x, use_iso = FALSE)
+params <- fit$SHASH_coef   # list with mu, sigma, nu, tau (sigma/tau on log scale)
+
+# Map x to approximate standard normal scores using fitted parameters
+z <- SHASH_to_normal(
+  x,
+  mu    = params$mu,
+  sigma = params$sigma,   # log-scale coefficient — do NOT apply exp() yourself
+  nu    = params$nu,
+  tau   = params$tau      # log-scale coefficient
+)
+
+# Invert the transformation to recover original scale
+x_back <- normal_to_SHASH(
+  z,
+  mu    = params$mu,
+  sigma = params$sigma,
+  nu    = params$nu,
+  tau   = params$tau
+)
+
+all.equal(x, x_back)   # TRUE
+```

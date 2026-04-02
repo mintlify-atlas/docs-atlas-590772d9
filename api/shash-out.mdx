@@ -1,0 +1,226 @@
+---
+title: "SHASH_out"
+description: "Iterative univariate outlier detection using the Sinh-Arcsinh (SHASH) distribution"
+---
+
+Detects outliers in a numeric vector by fitting a Sinh-Arcsinh (SHASH) distribution iteratively. At each iteration the SHASH model is fitted to the current inlier set, the data is normalised to an approximately standard-normal scale, and observations exceeding `thr1` standard deviations are excluded from the next iteration's fit. The loop continues until the inlier set stabilises (convergence) or `maxit` iterations are reached. Final outlier declarations use the separate threshold `thr`, which can differ from the convergence threshold `thr1`.
+
+```r
+SHASH_out(
+  x,
+  thr0        = 2.58,
+  thr1        = 2.58,
+  thr         = 4,
+  tail        = c("both", "upper", "lower"),
+  use_iso     = TRUE,
+  thr_iso     = 0.6,
+  maxit       = 100,
+  weight_init = NULL
+)
+```
+
+## How the iterative fitting loop works
+
+Before the main loop begins, a set of initial inlier weights is determined by one of three strategies (in order of precedence):
+
+1. **`weight_init` supplied** — the provided logical vector is used directly, bypassing all pre-screening.
+2. **`use_iso = TRUE`** — an isolation forest (via `isotree`) assigns anomaly scores to every observation. Points scoring above `thr_iso` are excluded from the first fit, with upper/lower directionality respected when `tail` is not `"both"`.
+3. **`use_iso = FALSE`** — a robust empirical rule (median ± `thr0` × MAD, normalised by 1.4826) is applied to identify initial candidates.
+
+The main loop then proceeds as follows:
+
+1. Fit a `SHASHo2` GAMLSS model to the data, downweighting observations not in the current inlier set.
+2. Transform every observation to an approximately normal scale using the fitted parameters via `SHASH_to_normal()`.
+3. Flag observations whose normalised score exceeds `thr1` (in the relevant tail) as outliers for the next iteration.
+4. If the inlier set is unchanged from the previous iteration, declare convergence and exit. Otherwise, repeat up to `maxit` times.
+
+After convergence, outliers in the final output are those whose normalised score exceeds `thr` (not `thr1`).
+
+## Parameters
+
+<ParamField path="x" type="numeric vector" required>
+  Input data vector. `NA` values are excluded from model fitting and propagated as `NA` in all output vectors. Must not be a matrix; pass a single column if working with tabular data.
+</ParamField>
+
+<ParamField path="thr0" type="numeric" default="2.58">
+  Threshold multiplier for the initial empirical-rule pre-screening step. Only used when `use_iso = FALSE` and `weight_init` is `NULL`. Observations more than `thr0` MADs from the median are excluded from the first fitting iteration.
+</ParamField>
+
+<ParamField path="thr1" type="numeric" default="2.58">
+  Threshold applied to SHASH-normalised scores during each iteration to determine which observations are treated as inliers going into the next fit. Convergence is declared when no observation changes inlier status between consecutive iterations.
+</ParamField>
+
+<ParamField path="thr" type="numeric" default="4">
+  Final threshold applied to the SHASH-normalised scores from the converged model to declare outliers in the returned `out_idx`. This is typically set higher than `thr1` to reduce false positives in the final output.
+</ParamField>
+
+<ParamField path="tail" type="character" default="both">
+  Which tail(s) to monitor for outliers. One of:
+
+  - `"both"` — flag observations where `|z| > thr`.
+  - `"upper"` — flag observations where `z > thr`.
+  - `"lower"` — flag observations where `z < -thr`.
+</ParamField>
+
+<ParamField path="use_iso" type="logical" default="TRUE">
+  If `TRUE`, an isolation forest is used to pre-screen candidate outliers before the first SHASH fit. Disable with `use_iso = FALSE` for faster computation, particularly in examples and simulations.
+</ParamField>
+
+<ParamField path="thr_iso" type="numeric" default="0.6">
+  Isolation forest anomaly score threshold in [0, 1]. Observations whose score is at or above this value are excluded from the first fitting iteration. Only used when `use_iso = TRUE`.
+</ParamField>
+
+<ParamField path="maxit" type="integer" default="100">
+  Maximum number of fitting iterations. The algorithm stops after `maxit` iterations regardless of whether the inlier set has converged. The `converged` field in the return value indicates whether convergence was reached before this limit.
+</ParamField>
+
+<ParamField path="weight_init" type="logical vector">
+  Optional logical vector of length `length(x)`. When supplied, these weights are used as the initial inlier set for the first iteration, bypassing both the isolation forest and the empirical-rule pre-screening entirely. `TRUE` indicates an inlier; `FALSE` indicates a suspected outlier.
+</ParamField>
+
+<Tip>
+  Set `use_iso = FALSE` to skip the isolation forest and significantly reduce runtime. This is recommended for exploratory analysis, simulations, and vignette examples. The isolation forest is most valuable when the data has complex multi-dimensional outlier structure; for simple univariate cases the empirical-rule pre-screening (`use_iso = FALSE`) is typically sufficient.
+</Tip>
+
+## Return value
+
+Returns a list of class `"SHASH_out"`.
+
+<ResponseField name="out_idx" type="integer vector">
+  Indices of observations in `x` flagged as outliers at the final threshold `thr`.
+</ResponseField>
+
+<ResponseField name="x_norm" type="numeric vector">
+  SHASH-normalised scores for every observation, of the same length as `x`. Values are `NA` wherever `x` was `NA`.
+</ResponseField>
+
+<ResponseField name="SHASH_coef" type="list">
+  Fitted SHASH parameter estimates from the final iteration, as returned by `gamlss::gamlssML()`.
+
+  <Expandable title="properties">
+    <ResponseField name="mu" type="numeric">
+      Location parameter. Shifts the centre of the distribution.
+    </ResponseField>
+    <ResponseField name="sigma" type="numeric">
+      Spread parameter **on the log scale**. The actual spread applied internally is `exp(sigma)`. A value of `0` corresponds to unit spread.
+    </ResponseField>
+    <ResponseField name="nu" type="numeric">
+      Skewness parameter. A value of `0` gives a symmetric distribution.
+    </ResponseField>
+    <ResponseField name="tau" type="numeric">
+      Tail-weight parameter **on the log scale**. The actual tail weight applied internally is `exp(tau)`. A value of `0` corresponds to normal-like tails.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Note>
+  `sigma` and `tau` in `SHASH_coef` are on the log scale as returned by `gamlss::gamlssML()`. To recover the natural-scale spread and tail-weight, compute `exp(result$SHASH_coef$sigma)` and `exp(result$SHASH_coef$tau)`.
+</Note>
+
+<ResponseField name="isotree_scores" type="numeric vector">
+  Isolation forest anomaly scores for every observation (same length as `x`). All values are `NA` when `use_iso = FALSE` or when `weight_init` was supplied.
+</ResponseField>
+
+<ResponseField name="initial_weights" type="logical vector">
+  Inlier weights used for the very first fitting iteration (same length as `x`). Reflects the output of whichever pre-screening strategy was applied.
+</ResponseField>
+
+<ResponseField name="indx_iters" type="integer matrix">
+  Matrix of dimensions `length(x)` × `last_iter`. Column `j` records which observations were flagged as outliers (value `1`) during iteration `j`. Rows corresponding to `NA` positions in `x` are also `NA`.
+</ResponseField>
+
+<ResponseField name="norm_iters" type="numeric matrix">
+  Matrix of dimensions `length(x)` × `last_iter`. Column `j` records the SHASH-normalised scores from iteration `j`. Rows corresponding to `NA` positions in `x` are also `NA`.
+</ResponseField>
+
+<ResponseField name="last_iter" type="integer">
+  Number of iterations completed before convergence or before hitting `maxit`.
+</ResponseField>
+
+<ResponseField name="converged" type="logical">
+  `TRUE` if the inlier weight vector stabilised before `maxit` was reached; `FALSE` if the algorithm stopped due to the iteration limit.
+</ResponseField>
+
+<ResponseField name="params" type="list">
+  Record of all input parameters (including the original `x` values), stored for reproducibility.
+</ResponseField>
+
+## Examples
+
+### Example 1: Synthetic data with known injected outliers
+
+```r
+library(rrobot)
+
+# Generate clean normal data, then inject outliers at known positions
+set.seed(42)
+x <- rnorm(200, mean = 10, sd = 2)
+
+outlier_positions <- c(17, 77, seq(190, 200))
+x[outlier_positions] <- x[outlier_positions] + 10
+
+result_sim <- SHASH_out(
+  x,
+  thr0    = 2.58,
+  thr1    = 2.58,
+  thr     = 4,
+  tail    = "both",
+  use_iso = FALSE   # skip isolation forest for speed
+)
+
+result_sim$out_idx   # recovered indices; should be close to outlier_positions
+result_sim$converged # TRUE if the iterative fit stabilised
+result_sim$last_iter # number of iterations taken
+```
+
+### Example 2: Real benchmark data (Hawkins-Bradu-Kass)
+
+```r
+library(rrobot)
+data("hbk", package = "robustbase")
+
+# Apply SHASH_out to the X1 column of the hbk benchmark dataset
+result_hbk <- SHASH_out(
+  hbk$X1,
+  thr0    = 2.58,
+  thr1    = 2.58,
+  thr     = 4,
+  tail    = "both",
+  use_iso = FALSE
+)
+
+# Flagged observation indices in the X1 column
+result_hbk$out_idx
+
+# Fitted SHASH parameters; sigma and tau are on the log scale
+result_hbk$SHASH_coef
+exp(result_hbk$SHASH_coef$sigma)  # natural-scale spread
+exp(result_hbk$SHASH_coef$tau)    # natural-scale tail weight
+
+# Did the algorithm converge?
+result_hbk$converged
+
+# How many iterations did it take?
+result_hbk$last_iter
+```
+
+### Example 3: Using weight_init to supply custom starting weights
+
+```r
+set.seed(1)
+x <- c(rnorm(95), rnorm(5, mean = 8))
+
+# Suppose you already know which observations are suspect
+suspect <- x > 5
+init_weights <- !suspect  # TRUE = inlier, FALSE = suspect outlier
+
+result_custom <- SHASH_out(
+  x,
+  weight_init = init_weights,
+  thr         = 4,
+  tail        = "upper",
+  use_iso     = FALSE
+)
+
+result_custom$out_idx
+```
